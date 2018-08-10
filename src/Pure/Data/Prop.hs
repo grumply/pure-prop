@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, MultiParamTypeClasses, PatternSynonyms, ViewPatterns #-}
+{-# LANGUAGE TypeFamilies, MultiParamTypeClasses, PatternSynonyms, ViewPatterns, FlexibleContexts #-}
 module Pure.Data.Prop 
     ( HasProp(..)
     , WithRef(WithRef)
