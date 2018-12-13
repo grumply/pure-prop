@@ -5,6 +5,7 @@ module Pure.Data.Prop
     ) where
 
 import Control.Arrow ((&&&))
+
 -- | Pure.Data.Prop implements an approach to react-style properties that works
 -- well with the view patterns in pure-core.  This approach is commonly used for
 -- UI frameworks or places where components are highly customizable, but often
@@ -17,7 +18,7 @@ import Control.Arrow ((&&&))
 -- and set the width on those components:
 --
 -- First, create a property proxy.  The constructor commonly uses an underscore
--- to avoid overlapping with the pattern.  This constructo will be in module 
+-- to avoid overlapping with the pattern.  This constructor will be in module 
 -- that is shared by all of the components with the property.
 --
 -- > data Width = Width_
@@ -53,6 +54,9 @@ import Control.Arrow ((&&&))
 -- Note that the associated type family allows for different components to use
 -- different types for the property, which is especially common in UI 
 -- construction, where the same name can be used for different concepts.
+--
+-- `Pure.Data.Prop.TH` now supports automating the construction of all of the
+-- above.
 
 -- | The `HasProp` class links a data type, `p`, to a field, set of fields, or 
 -- derived value, `a`. We call a derived value a property and it is generally
