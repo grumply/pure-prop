@@ -17,6 +17,7 @@ library
 
   build-depends:
       base >=4.8,
+      pure-core >= 0.7 && < 1,
       template-haskell
 
   hs-source-dirs:      src

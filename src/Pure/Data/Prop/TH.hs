@@ -1,11 +1,32 @@
 {-# LANGUAGE QuasiQuotes, TemplateHaskell, ViewPatterns #-}
-module Pure.Data.Prop.TH (mkProp, mkPropMany, mkHas, mkHasMany, mkLocalProps, (&&&)) where
+module Pure.Data.Prop.TH 
+    ( -- * Low-level derivers; often used in libraries to manage property reuse
+      mkProp
+    , mkPropMany
+    , mkHas
+    , mkHasMany
+      -- * Medium-level deriver
+    , mkLocalProps
+    , mkComponentPattern
+      -- * High-level derivers
+    , deriveLocalProps
+    , deriveHasChildren
+    , deriveHasFeatures
+      -- * Batteries-included deriver; often used in standalone libraries
+    , deriveLocalComponent
+      -- * Included exports
+    , (&&&)
+    ) where
 
+import Pure.Data.View.Patterns
 import Pure.Data.Prop
 
 import Language.Haskell.TH
+import Language.Haskell.TH.Syntax
 import Control.Arrow ((&&&))
+import Data.Char
 import Data.Traversable (traverse)
+import Data.List
 
 -- | Given a property name, prop constructs a property type and a property 
 -- pattern.
@@ -148,3 +169,112 @@ mkLocalProps comp nls = do
     ds <- mkPropMany (fmap fst nls)
     is <- mkHasMany comp $ fmap (\(n,l) -> (mkName n,l)) nls
     return (ds ++ is)
+
+-- | Given a name, derive a type-fixing pattern of the same name. To use this 
+-- method, the component is required to have a constructor with a different 
+-- name from the one supplied here.
+mkComponentPattern :: Name -> Q [Dec]
+mkComponentPattern comp@(Name (OccName occ) _) = do
+    TyConI (DataD _ nm tyvs _ _ _) <- reify comp
+    let c = mkName "c"
+        nm = mkName occ
+        ty = datType nm tyvs
+        typ = PatSynSigD nm (ForallT [] [] (AppT (AppT ArrowT ty) ty))
+        dec = PatSynD nm (PrefixPatSyn [c]) ImplBidir (VarP c)
+    return [typ,dec]
+
+-- | Automatically derive properties for non-feature and non-children features
+-- for the given component name. These are local props because the property 
+-- types are defined locally, which prevents the modularization often expected 
+-- in libraries.
+deriveLocalProps :: Name -> Q [Dec]
+deriveLocalProps nm = do
+    TyConI (DataD _ _ _ _ [RecC _ fs] _) <- reify nm
+    let capitalize [] = []
+        capitalize (c:cs) = toUpper c : cs
+        cls = fmap (\((nm@(Name (OccName occ) _),_,_)) -> (capitalize occ,nm)) fs
+        noFeatures = filter (\(x,_) -> x /= "Features") 
+        noChildren = filter (\(x,_) -> x /= "Children")
+    mkLocalProps nm (noChildren (noFeatures cls))
+
+-- | Automatically derive an instance of `HasChildren` for the given component
+-- name. Uses the first field for which the name is `children` or the type is
+-- `[View]`. If the component has no such field, it simply returns an empty 
+-- list.
+deriveHasChildren :: Name -> Q [Dec]
+deriveHasChildren nm = do
+    TyConI (DataD _ _ tyvs _ [RecC _ fs] _) <- reify nm
+    let lts = fmap (\(Name (OccName occ) _,_,ty) -> (occ,ty)) fs
+        vty = ListT `AppT` (ConT (mkName "View"))
+        children = filter (\(occ,ty) -> ty == vty || occ == "children") lts
+    case children of
+        [] -> return []
+        ((mkName -> occ,_):_) -> do
+            let a  = mkName "a"
+                cs = mkName "cs"
+
+                ity = ((ConT ''HasChildren) `AppT` datType nm tyvs)
+
+                get = 
+                    let cls = [Clause [] (NormalB (VarE occ)) []]
+                    in FunD 'getChildren cls
+
+                set =
+                    let bdy = RecUpdE (VarE a) [(occ,VarE cs)]
+                        cls = [Clause [VarP cs, VarP a] (NormalB bdy) []]
+                    in FunD 'setChildren cls
+
+                ins = InstanceD Nothing [] ity [get,set]
+
+            return [ins]
+
+datType :: Name -> [TyVarBndr] -> Type
+datType nm = foldl AppT (ConT nm) . fmap toType
+    where
+        toType (PlainTV nm) = VarT nm
+        toType (KindedTV nm _) = VarT nm 
+
+-- | Automatically derive an instance of `HasFeatures` for the given component 
+-- name. Uses the first field for which the name is `features` or the type is
+-- `Features`. If the component has no such field, it simply returns an empty 
+-- list.
+deriveHasFeatures :: Name -> Q [Dec]
+deriveHasFeatures nm = do
+    TyConI (DataD _ _ tyvs _ [RecC _ fs] _) <- reify nm
+    let lts = fmap (\(Name (OccName occ) _,_,ty) -> (occ,ty)) fs
+        vty = ConT (mkName "Features")
+        features = filter (\(occ,ty) -> ty == vty || occ == "features") lts
+    case features of
+        [] -> return []
+        ((mkName -> occ,_):_) -> do
+            let a  = mkName "a"
+                fs = mkName "fs"
+
+                ity = ((ConT ''HasFeatures) `AppT` datType nm tyvs)
+
+                get = 
+                    let cls = [Clause [] (NormalB (VarE occ)) []]
+                    in FunD 'getFeatures cls
+
+                set =
+                    let bdy = RecUpdE (VarE a) [(occ,VarE fs)]
+                        cls = [Clause [VarP fs, VarP a] (NormalB bdy) []]
+                    in FunD 'setFeatures cls
+
+                ins = InstanceD Nothing [] ity [get,set]
+
+            return [ins]
+
+-- | Batteries-included deriver. Given a component name, constructs a 
+-- type-fixing pattern via `mkComponentPattern`, an instance of `HasChildren`
+-- via `deriveHasChildren` if applicable, an instance of `HasFeatures` via
+-- `deriveHasFeatures` if applicable, and local properties for all other
+-- fields via `deriveLocalProps`.
+deriveLocalComponent :: Name -> Q [Dec]
+deriveLocalComponent nm = do
+    p  <- mkComponentPattern nm
+    cs <- deriveHasChildren nm
+    fs <- deriveHasFeatures nm
+    ps <- deriveLocalProps nm
+    return (p ++ cs ++ fs ++ ps)
+
